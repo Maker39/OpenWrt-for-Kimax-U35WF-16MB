@@ -1,7 +1,7 @@
 name: Build OpenWrt for Kimax U35WF 16MB
 
 on:
-  workflow_dispatch: # Позволяет запускать сборку вручную кнопкой на GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,20 +18,17 @@ jobs:
 
     - name: Download and Extract Image Builder
       run: |
-        # Делаем скрипт исполняемым и запускаем его напрямую в обход парсера GitHub
         chmod +x download.sh
         ./download.sh
-        
-        # Передаем путь к сборщику в глобальный контекст шагов
         echo "IB_ROOT=$GITHUB_WORKSPACE/openwrt-ib" >> $GITHUB_ENV
 
     - name: Patch Hardware Limits for 16MB Flash
       run: |
         cd $IB_ROOT
-        # 1. Разрешаем сборщику компилировать образ размером до 16МБ (15872k)
+        # Разрешаем компиляцию до 16МБ
         sed -i 's/IMAGE_SIZE := 7808k/IMAGE_SIZE := 15872k/g' target/linux/ramips/image/mt7620.mk
         
-        # 2. Патч DTS для расширения раздела firmware до 16МБ
+        # Расширяем раздел прошивки в DTS
         DTS_FILE="target/linux/ramips/dts/mt7620n_kimax_u35wf.dts"
         if [ -f "$DTS_FILE" ]; then
           sed -i 's/reg = <0x50000 0x7b0000>/reg = <0x50000 0xfb0000>/g' $DTS_FILE
@@ -45,13 +42,45 @@ jobs:
         
         cat << 'EOF' > files/etc/uci-defaults/99-custom-nas-settings
         #!/bin/sh
+        
+        # Настройки имени хоста и сети
         uci set system.@system.hostname='KimaxNAS'
         uci commit system
         uci set network.lan.proto='dhcp'
         uci delete dhcp.lan
         uci commit network
         uci commit dhcp
+        
+        # Включаем fstab
         /etc/init.d/fstab enable
+        
+        # Отложенный скрипт автоматической установки Samba4 после поднятия интернета
+        cat << 'INNER_EOF' > /etc/init.d/install-samba-delayed
+        #!/bin/sh /etc/rc.common
+        START=99
+        
+        start() {
+            # Ждем появления интернета (до 60 секунд)
+            for i in $(seq 1 60); do
+                if ping -c 1 -W 2 downloads.openwrt.org >/dev/null 2>&1; then
+                    break
+                fi
+                sleep 2
+            done
+            
+            # Обновляем репозитории и ставим Samba4 во внутреннюю память
+            apk update
+            apk add samba4-server samba4-utils luci-app-samba4 wsdd2
+            
+            # Удаляем этот временный стартовый скрипт, так как задача выполнена
+            /etc/init.d/install-samba-delayed disable
+            rm -f /etc/init.d/install-samba-delayed
+        }
+        INNER_EOF
+        
+        chmod +x /etc/init.d/install-samba-delayed
+        /etc/init.d/install-samba-delayed enable
+        
         exit 0
         EOF
         
@@ -60,7 +89,8 @@ jobs:
     - name: Compile OpenWrt Firmware
       run: |
         cd $IB_ROOT
-        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci samba4-server samba4-utils luci-app-samba4 wsdd2 -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
+        # Исключаем Samba4 из компиляции (.bin похудеет до ~7-8 МБ и легко соберется)
+        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
         make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="files/"
 
     - name: Upload Firmware to Artifacts
