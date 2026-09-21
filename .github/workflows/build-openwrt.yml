@@ -18,14 +18,12 @@ jobs:
 
     - name: Download and Extract Image Builder
       run: |
-        echo "=== ЗАПУСК СКАЧИВАНИЯ ==="
+        echo "=== СКАЧИВАНИЕ ИМИДЖ БИЛДЕРА ==="
         
-        # Задаем уникальное имя переменной, чтобы GitHub не смог его перехватить
-        MY_SECRET_LINK_VAR="https://openwrt.org"
+        # Обходим любые переменные: собираем ссылку по буквам прямо в wget
+        wget -q "https://downloads.""openwrt.org/releases/25.12.5/targets/ramips/mt7620/openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64.tar.zst"
         
-        wget -q "$MY_SECRET_LINK_VAR"
-        
-        echo "=== РАСПАКОВКА ==="
+        echo "=== РАСПАКОВКА АРХИВА ==="
         tar --zstd -xf openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64.tar.zst
         
         mv openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64 openwrt-ib
