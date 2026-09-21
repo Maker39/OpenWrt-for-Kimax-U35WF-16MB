@@ -5,8 +5,7 @@ on:
 
 env:
   RELEASES_URL: https://openwrt.org
-  # Выбираем стабильную версию OpenWrt (можно поменять на актуальную, например 23.05.5)
-  VERSION: "23.05.5" 
+  VERSION: "25.12.5" # Актуальная стабильная версия
   TARGET: "ramips"
   SUBTARGET: "mt7620"
   PROFILE: "kimax_u35wf"
@@ -22,7 +21,7 @@ jobs:
     - name: Setup Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libncurses5-dev libssl-dev gawk git profile-sync-daemon wget bzip2
+        sudo apt-get install -y build-essential libncurses5-dev libssl-dev gawk git wget bzip2 xz-utils
 
     - name: Download and Extract Image Builder
       run: |
@@ -37,14 +36,15 @@ jobs:
       run: |
         cd $IB_ROOT
         
-        # 1. Разрешаем сборщику собирать образ размером до 16МБ (минус загрузчик и конфиг = 15872k)
+        # 1. Разрешаем сборщику компилировать образ размером до 16МБ (15872k)
         sed -i 's/IMAGE_SIZE := 7808k/IMAGE_SIZE := 15872k/g' target/linux/ramips/image/mt7620.mk
         
-        # 2. Правим разметку разделов (DTS) — растягиваем раздел прошивки 'firmware' на все 16МБ
-        # Старый размер 0x7b0000 (7.6MB) меняем на 0xfb0000 (15.6MB)
+        # 2. Универсальный патч DTS: ищем блок разметки firmware и расширяем его размер
+        # В зависимости от синтаксиса версии, меняем старый лимит на 16МБ (размер 0xfb0000)
         DTS_FILE="target/linux/ramips/dts/mt7620n_kimax_u35wf.dts"
         if [ -f "$DTS_FILE" ]; then
           sed -i 's/reg = <0x50000 0x7b0000>/reg = <0x50000 0xfb0000>/g' $DTS_FILE
+          sed -i 's/reg = <0x50000 0x7B0000>/reg = <0x50000 0xFB0000>/g' $DTS_FILE
         else
           echo "Предупреждение: DTS-файл не найден по стандартному пути!"
         fi
@@ -54,23 +54,23 @@ jobs:
         cd $IB_ROOT
         mkdir -p files/etc/uci-defaults
         
-        # Создаем скрипт, который выполнится ОДИН РАЗ при первой загрузке
+        # Создаем скрипт автоматической настройки при первом запуске
         cat << 'EOF' > files/etc/uci-defaults/99-custom-nas-settings
         #!/bin/sh
         
-        # Изменяем имя устройства
+        # Изменяем имя устройства для домашней сети
         uci set system.@system.hostname='KimaxNAS'
         uci commit system
         
         # Переводим LAN-порт в режим DHCP-клиента (получение IP от основного роутера)
         uci set network.lan.proto='dhcp'
         
-        # Отключаем встроенную раздачу IP (DHCP-сервер), чтобы не ломать вашу сеть
+        # Полностью убираем встроенную раздачу DHCP, чтобы Kimax не конфликтовал с основным роутером
         uci delete dhcp.lan
         uci commit network
         uci commit dhcp
         
-        # Включаем автоматическое монтирование подключенных дисков
+        # Включаем автоматическое монтирование подключенных через USB дисков
         /etc/init.d/fstab enable
         
         exit 0
@@ -82,10 +82,11 @@ jobs:
       run: |
         cd $IB_ROOT
         
-        # Определяем список пакетов: удаляем ppp/ipv6, добавляем утилиты для USB, NTFS и Samba4
+        # Набор пакетов для NAS под новый менеджер apk:
+        # Включает драйверы USB, Samba4, встроенный быстрый NTFS3, веб-интерфейс LuCI и сетевой анонс wsdd2
         PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci samba4-server samba4-utils luci-app-samba4 wsdd2 -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
         
-        # Запускаем сборку
+        # Запускаем сборку прошивки
         make image PROFILE="${{ env.PROFILE }}" PACKAGES="$PACKAGES" FILES="files/"
 
     - name: Upload Firmware to Artifacts
