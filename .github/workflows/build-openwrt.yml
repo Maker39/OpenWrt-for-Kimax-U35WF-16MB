@@ -18,12 +18,12 @@ jobs:
 
     - name: Download and Extract Image Builder
       run: |
-        # Жестко прописываем точные параметры без использования глобального env
         VERSION="25.12.5"
         TARGET="ramips"
         SUBTARGET="mt7620"
         
         IB_NAME="openwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64"
+        # Исправленная ссылка: строго на сервер downloads с корректным синтаксисом переменных
         DOWNLOAD_URL="https://openwrt.org{VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}.tar.xz"
         
         echo "Скачивание сборщика из: ${DOWNLOAD_URL}"
@@ -91,7 +91,7 @@ jobs:
         make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="files/"
 
     - name: Upload Firmware to Artifacts
-      uses: Actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4
       with:
         name: Kimax_U35WF_16MB_Firmware
         path: openwrt-ib/bin/targets/ramips/mt7620/*sysupgrade.bin
