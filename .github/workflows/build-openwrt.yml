@@ -1,7 +1,7 @@
 name: Build OpenWrt for Kimax U35WF 16MB
 
 on:
-  workflow_dispatch: # Позволяет запускать сборку вручную кнопкой на GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,8 +20,10 @@ jobs:
       run: |
         echo "=== ЗАПУСК СКАЧИВАНИЯ ==="
         
-        # Скачиваем архив напрямую по жестко прописанной монолитной ссылке (без скрытых переменных)
-        wget -q "https://openwrt.org"
+        # Задаем уникальное имя переменной, чтобы GitHub не смог его перехватить
+        MY_SECRET_LINK_VAR="https://openwrt.org"
+        
+        wget -q "$MY_SECRET_LINK_VAR"
         
         echo "=== РАСПАКОВКА ==="
         tar --zstd -xf openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64.tar.zst
@@ -32,10 +34,8 @@ jobs:
     - name: Patch Hardware Limits for 16MB Flash
       run: |
         cd $IB_ROOT
-        # 1. Разрешаем компилировать образ размером до 16МБ
         sed -i 's/IMAGE_SIZE := 7808k/IMAGE_SIZE := 15872k/g' target/linux/ramips/image/mt7620.mk
         
-        # 2. Расширяем раздел прошивки в DTS (поддерживаем оба регистра)
         DTS_FILE="target/linux/ramips/dts/mt7620n_kimax_u35wf.dts"
         if [ -f "$DTS_FILE" ]; then
           sed -i 's/reg = <0x50000 0x7b0000>/reg = <0x50000 0xfb0000>/g' $DTS_FILE
@@ -49,45 +49,32 @@ jobs:
         
         cat << 'EOF' > files/etc/uci-defaults/99-custom-nas-settings
         #!/bin/sh
-        
-        # Настройки имени хоста и сети
         uci set system.@system.hostname='KimaxNAS'
         uci commit system
         uci set network.lan.proto='dhcp'
         uci delete dhcp.lan
         uci commit network
         uci commit dhcp
-        
-        # Включаем автоматическое монтирование USB-дисков
         /etc/init.d/fstab enable
         
-        # Отложенный скрипт автоматической установки Samba4 после поднятия интернета
         cat << 'INNER_EOF' > /etc/init.d/install-samba-delayed
         #!/bin/sh /etc/rc.common
         START=99
-        
         start() {
-            # Ждем появления интернета (до 60 секунд)
-            for i in $(seq 1 60); do
+            for i in \$(seq 1 60); do
                 if ping -c 1 -W 2 downloads.openwrt.org >/dev/null 2>&1; then
                     break
                 fi
                 sleep 2
             done
-            
-            # Обновляем репозитории и ставим Samba4 во внутреннюю память (/overlay)
             apk update
             apk add samba4-server samba4-utils luci-app-samba4 wsdd2
-            
-            # Самоудаление скрипта после успешной установки
             /etc/init.d/install-samba-delayed disable
             rm -f /etc/init.d/install-samba-delayed
         }
         INNER_EOF
-        
         chmod +x /etc/init.d/install-samba-delayed
         /etc/init.d/install-samba-delayed enable
-        
         exit 0
         EOF
         
@@ -96,7 +83,6 @@ jobs:
     - name: Compile OpenWrt Firmware
       run: |
         cd $IB_ROOT
-        # Базовый облегченный набор пакетов (Samba4 доставится сама при первом старте)
         PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
         make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="files/"
 
