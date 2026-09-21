@@ -14,25 +14,20 @@ jobs:
     - name: Setup Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libncurses5-dev libssl-dev gawk git wget bzip2 xz-utils
+        sudo apt-get install -y build-essential libncurses5-dev libssl-dev gawk git wget bzip2 zstd
 
     - name: Download and Extract Image Builder
       run: |
-        VERSION="25.12.5"
-        TARGET="ramips"
-        SUBTARGET="mt7620"
+        # Скачиваем официальный Image Builder версии 25.12.5 (архив в формате .tar.zst)
+        wget -q "https://openwrt.org"
         
-        IB_NAME="openwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64"
-        # Исправленная ссылка: строго на сервер downloads с корректным синтаксисом переменных
-        DOWNLOAD_URL="https://openwrt.org{VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}.tar.xz"
+        # Распаковываем современный zst-архив
+        tar --zstd -xf openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64.tar.zst
         
-        echo "Скачивание сборщика из: ${DOWNLOAD_URL}"
-        wget -q "$DOWNLOAD_URL"
+        # Переименовываем папку для удобства следующих шагов
+        mv openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64 openwrt-ib
         
-        tar -xf "${IB_NAME}.tar.xz"
-        mv "${IB_NAME}" openwrt-ib
-        
-        # Передаем путь к папке сборщика в следующие шаги
+        # Передаем путь к сборщику в глобальный контекст шагов
         echo "IB_ROOT=$GITHUB_WORKSPACE/openwrt-ib" >> $GITHUB_ENV
 
     - name: Patch Hardware Limits for 16MB Flash
