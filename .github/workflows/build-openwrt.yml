@@ -39,57 +39,49 @@ jobs:
           sed -i 's/reg = <0x50000 0x7B0000>/reg = <0x50000 0xFB0000>/g' $DTS_FILE
         fi
 
-    - name: Create Custom Configuration Files (First-boot Script)
+    - name: Pre-configure Network and System Settings
       run: |
-        # ВАЖНО: Создаем кастомную структуру файлов строго внутри директории самого Image Builder
         cd $IB_ROOT
-        mkdir -p my_files/etc/uci-defaults
+        # Создаем кастомную структуру строго внутри рабочей папки сборщика
+        mkdir -p my_files/etc/config
         
-        cat << 'EOF' > my_files/etc/uci-defaults/99-custom-nas-settings
-        #!/bin/sh
-        
-        # Настройки имени хоста и сети
-        uci set system.@system.hostname='KimaxNAS'
-        uci commit system
-        uci set network.lan.proto='dhcp'
-        uci delete dhcp.lan
-        uci commit network
-        uci commit dhcp
-        
-        # Включаем автоматическое монтирование дисков
-        /etc/init.d/fstab enable
-        
-        # Отложенный скрипт автоматической установки Samba4 после поднятия интернета
-        cat << 'INNER_EOF' > /etc/inner_install.sh
-        #!/bin/sh
-        for i in \$(seq 1 60); do
-            if ping -c 1 -W 2 downloads.openwrt.org >/dev/null 2>&1; then
-                break
-            fi
-            sleep 2
-        done
-        apk update
-        apk add samba4-server samba4-utils luci-app-samba4 wsdd2
-        rm -f /etc/inner_install.sh
-        INNER_EOF
-        
-        chmod +x /etc/inner_install.sh
-        # Запускаем установку в фоне, чтобы не вешать загрузку роутера
-        /etc/inner_install.sh &
-        
-        exit 0
+        # 1. Жестко задаем имя хоста в системный конфиг
+        cat << 'EOF' > my_files/etc/config/system
+        config system
+            option hostname 'KimaxNAS'
+            option timezone 'UTC'
+            option ttylogin '0'
         EOF
-        
-        chmod +x my_files/etc/uci-defaults/99-custom-nas-settings
+
+        # 2. Переводим интерфейс LAN в режим DHCP-клиента
+        cat << 'EOF' > my_files/etc/config/network
+        config interface 'loopback'
+            option device 'lo'
+            option proto 'static'
+            option ipaddr '127.0.0.1'
+            option netmask '255.0.0.0'
+
+        config globals 'globals'
+            option ula_prefix 'fd00::/48'
+
+        config interface 'lan'
+            option device 'eth0'
+            option proto 'dhcp'
+        EOF
+
+        # 3. Подменяем конфигурацию DHCP, чтобы dnsmasq не запускал сервер
+        cat << 'EOF' > my_files/etc/config/dhcp
+        # DHCP server disabled for NAS mode
+        EOF
 
     - name: Compile OpenWrt Firmware
       run: |
         cd $IB_ROOT
-        # Пакеты для базовой работы USB-накопителей
-        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
+        # Набор пакетов со встроенной Samba4 и утилитами
+        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci samba4-server samba4-utils luci-app-samba4 wsdd2 -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
         
-        # Передаем абсолютный путь к папке FILES через переменную среды $IB_ROOT
-        make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="$IB_ROOT/my_files"
+        # Запуск сборки с использованием относительного пути к папке кастомных файлов
+        make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="my_files"
 
     - name: Upload Firmware to Artifacts
       uses: actions/upload-artifact@v4
