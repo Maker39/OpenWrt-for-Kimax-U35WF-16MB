@@ -77,9 +77,9 @@ jobs:
       run: |
         cd $IB_ROOT
         
-        # Набор пакетов: Включаем KSMBD, веб-панель управления luci-app-ksmbd, wsdd2 для Windows, 
-        # корневые сертификаты ca-bundle для фикса SSL, USB-драйверы и все файловые системы (включая NTFS3)
-        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci luci-app-ksmbd ksmbd-utils wsdd2 ca-bundle -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
+        # Набор пакетов: исправлен под актуальную структуру OpenWrt 25.12
+        # kmod-fs-ksmbd (модуль ядра) + ksmbd-server (сервер) + luci-app-ksmbd (веб-интерфейс)
+        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci kmod-fs-ksmbd ksmbd-server luci-app-ksmbd wsdd2 ca-bundle -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
         
         # Сборка прошивки
         make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="files"
