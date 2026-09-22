@@ -19,21 +19,20 @@ jobs:
     - name: Download and Extract Image Builder
       run: |
         echo "=== СКАЧИВАНИЕ ИМИДЖ БИЛДЕРА ==="
-        
-        # Обходим любые переменные: собираем ссылку по буквам прямо в wget
         wget -q "https://downloads.""openwrt.org/releases/25.12.5/targets/ramips/mt7620/openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64.tar.zst"
         
         echo "=== РАСПАКОВКА АРХИВА ==="
         tar --zstd -xf openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64.tar.zst
-        
         mv openwrt-imagebuilder-25.12.5-ramips-mt7620.Linux-x86_64 openwrt-ib
         echo "IB_ROOT=$GITHUB_WORKSPACE/openwrt-ib" >> $GITHUB_ENV
 
     - name: Patch Hardware Limits for 16MB Flash
       run: |
         cd $IB_ROOT
+        # 1. Разрешаем компилировать образ размером до 16МБ
         sed -i 's/IMAGE_SIZE := 7808k/IMAGE_SIZE := 15872k/g' target/linux/ramips/image/mt7620.mk
         
+        # 2. Расширяем раздел прошивки в DTS
         DTS_FILE="target/linux/ramips/dts/mt7620n_kimax_u35wf.dts"
         if [ -f "$DTS_FILE" ]; then
           sed -i 's/reg = <0x50000 0x7b0000>/reg = <0x50000 0xfb0000>/g' $DTS_FILE
@@ -42,47 +41,55 @@ jobs:
 
     - name: Create Custom Configuration Files (First-boot Script)
       run: |
+        # ВАЖНО: Создаем кастомную структуру файлов строго внутри директории самого Image Builder
         cd $IB_ROOT
-        mkdir -p files/etc/uci-defaults
+        mkdir -p my_files/etc/uci-defaults
         
-        cat << 'EOF' > files/etc/uci-defaults/99-custom-nas-settings
+        cat << 'EOF' > my_files/etc/uci-defaults/99-custom-nas-settings
         #!/bin/sh
+        
+        # Настройки имени хоста и сети
         uci set system.@system.hostname='KimaxNAS'
         uci commit system
         uci set network.lan.proto='dhcp'
         uci delete dhcp.lan
         uci commit network
         uci commit dhcp
+        
+        # Включаем автоматическое монтирование дисков
         /etc/init.d/fstab enable
         
-        cat << 'INNER_EOF' > /etc/init.d/install-samba-delayed
-        #!/bin/sh /etc/rc.common
-        START=99
-        start() {
-            for i in \$(seq 1 60); do
-                if ping -c 1 -W 2 downloads.openwrt.org >/dev/null 2>&1; then
-                    break
-                fi
-                sleep 2
-            done
-            apk update
-            apk add samba4-server samba4-utils luci-app-samba4 wsdd2
-            /etc/init.d/install-samba-delayed disable
-            rm -f /etc/init.d/install-samba-delayed
-        }
+        # Отложенный скрипт автоматической установки Samba4 после поднятия интернета
+        cat << 'INNER_EOF' > /etc/inner_install.sh
+        #!/bin/sh
+        for i in \$(seq 1 60); do
+            if ping -c 1 -W 2 downloads.openwrt.org >/dev/null 2>&1; then
+                break
+            fi
+            sleep 2
+        done
+        apk update
+        apk add samba4-server samba4-utils luci-app-samba4 wsdd2
+        rm -f /etc/inner_install.sh
         INNER_EOF
-        chmod +x /etc/init.d/install-samba-delayed
-        /etc/init.d/install-samba-delayed enable
+        
+        chmod +x /etc/inner_install.sh
+        # Запускаем установку в фоне, чтобы не вешать загрузку роутера
+        /etc/inner_install.sh &
+        
         exit 0
         EOF
         
-        chmod +x files/etc/uci-defaults/99-custom-nas-settings
+        chmod +x my_files/etc/uci-defaults/99-custom-nas-settings
 
     - name: Compile OpenWrt Firmware
       run: |
         cd $IB_ROOT
+        # Пакеты для базовой работы USB-накопителей
         PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
-        make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="files/"
+        
+        # Передаем абсолютный путь к папке FILES через переменную среды $IB_ROOT
+        make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="$IB_ROOT/my_files"
 
     - name: Upload Firmware to Artifacts
       uses: actions/upload-artifact@v4
