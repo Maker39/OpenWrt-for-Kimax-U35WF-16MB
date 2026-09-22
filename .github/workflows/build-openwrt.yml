@@ -39,14 +39,15 @@ jobs:
           sed -i 's/reg = <0x50000 0x7B0000>/reg = <0x50000 0xFB0000>/g' $DTS_FILE
         fi
 
-    - name: Pre-configure Network and System Settings
+    - name: Create Custom Configuration Files (First-boot Script)
       run: |
         cd $IB_ROOT
-        # Создаем кастомную структуру строго внутри рабочей папки сборщика
-        mkdir -p my_files/etc/config
+        # Официальный каталог для кастомных файлов по умолчанию называется 'files'
+        mkdir -p files/etc/config
+        mkdir -p files/etc/uci-defaults
         
-        # 1. Жестко задаем имя хоста в системный конфиг
-        cat << 'EOF' > my_files/etc/config/system
+        # 1. Запекаем имя хоста напрямую в систему
+        cat << 'EOF' > files/etc/config/system
         config system
             option hostname 'KimaxNAS'
             option timezone 'UTC'
@@ -54,7 +55,7 @@ jobs:
         EOF
 
         # 2. Переводим интерфейс LAN в режим DHCP-клиента
-        cat << 'EOF' > my_files/etc/config/network
+        cat << 'EOF' > files/etc/config/network
         config interface 'loopback'
             option device 'lo'
             option proto 'static'
@@ -69,19 +70,50 @@ jobs:
             option proto 'dhcp'
         EOF
 
-        # 3. Подменяем конфигурацию DHCP, чтобы dnsmasq не запускал сервер
-        cat << 'EOF' > my_files/etc/config/dhcp
-        # DHCP server disabled for NAS mode
+        # 3. Полностью отключаем встроенную службу DHCP
+        cat << 'EOF' > files/etc/config/dhcp
+        # DHCP disabled for NAS
         EOF
+
+        # 4. Скрипт автоматической фоновой установки Samba4 из интернета после старта
+        cat << 'EOF' > files/etc/uci-defaults/99-install-samba
+        #!/bin/sh
+        
+        # Включаем автоматическое монтирование USB-дисков
+        /etc/init.d/fstab enable
+        
+        # Пишем маленький фоновый скрипт установки
+        cat << 'INNER_EOF' > /tmp/bg_install.sh
+        #!/bin/sh
+        # Цикл ожидания интернета
+        for i in \$(seq 1 60); do
+            if ping -c 1 -W 2 downloads.openwrt.org >/dev/null 2>&1; then
+                break
+            fi
+            sleep 2
+        done
+        # Как только сеть появилась — накатываем Samba прямо в свободные 8.4 МБ памяти
+        apk update
+        apk add samba4-server samba4-utils luci-app-samba4 wsdd2
+        rm -f /tmp/bg_install.sh
+        INNER_EOF
+        
+        chmod +x /tmp/bg_install.sh
+        /tmp/bg_install.sh &
+        
+        exit 0
+        EOF
+        
+        chmod +x files/etc/uci-defaults/99-install-samba
 
     - name: Compile OpenWrt Firmware
       run: |
         cd $IB_ROOT
-        # Набор пакетов со встроенной Samba4 и утилитами
-        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci samba4-server samba4-utils luci-app-samba4 wsdd2 -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
+        # Облегченный на этапе сборки набор пакетов (USB, FS, NTFS3, LuCI)
+        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
         
-        # Запуск сборки с использованием относительного пути к папке кастомных файлов
-        make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="my_files"
+        # Запускаем сборку. Image Builder автоматически подхватит папку 'files'
+        make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="files"
 
     - name: Upload Firmware to Artifacts
       uses: actions/upload-artifact@v4
