@@ -52,7 +52,7 @@ jobs:
             option ttylogin '0'
         EOF
 
-        # 2. Переводим интерфейс LAN в режим DHCP-клиента
+        # 2. Базовая конфигурация проводного порта LAN (DHCP-клиент)
         cat << 'EOF' > files/etc/config/network
         config interface 'loopback'
             option device 'lo'
@@ -77,9 +77,13 @@ jobs:
       run: |
         cd $IB_ROOT
         
-        # Набор пакетов: исправлен под актуальную структуру OpenWrt 25.12
-        # kmod-fs-ksmbd (модуль ядра) + ksmbd-server (сервер) + luci-app-ksmbd (веб-интерфейс)
-        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci kmod-fs-ksmbd ksmbd-server luci-app-ksmbd wsdd2 ca-bundle -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
+        # Набор пакетов:
+        # 1. СЕТЬ И ПСЕВДОБРИДЖ: relayd, luci-proto-relay (мост кабель + Wi-Fi)
+        # 2. ПОДДЕРЖКА WPS И ПОЛНЫЙ WI-FI: wpad-mbedtls (заменяет базовый урезанный wpad)
+        # 3. ФИЛЕ СЕРВЕР И ИНТЕРФЕЙСЫ: kmod-fs-ksmbd, ksmbd-server, luci-app-ksmbd, wsdd2
+        # 4. ФИКС СЕРТИФИКАТОВ SSL: ca-bundle (чтобы у apk update больше никогда не было ошибок)
+        # 5. ДРАЙВЕРЫ ДИСКОВ: kmod-usb2, kmod-usb-storage, kmod-scsi-core, kmod-fs-ext4, kmod-fs-vfat, kmod-fs-ntfs3, block-mount, luci
+        PACKAGES="kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat kmod-fs-ntfs3 block-mount luci kmod-fs-ksmbd ksmbd-server luci-app-ksmbd wsdd2 ca-bundle relayd luci-proto-relay wpad-mbedtls -wpad-basic-mbedtls -luci-app-attendedsysupgrade -ppp -ppp-mod-pppoe -odhcp6c -odhcpd-ipv6only"
         
         # Сборка прошивки
         make image PROFILE="kimax_u35wf" PACKAGES="$PACKAGES" FILES="files"
